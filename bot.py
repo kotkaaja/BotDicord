@@ -17,30 +17,28 @@ ALLOWED_EXTENSIONS = ['.lua', '.luac', '.txt', '.zip', '.js', '.html', '.htm']
 
 # --- DAFTAR POLA YANG DISEMPURNAKAN DENGAN REGEX ---
 PATTERNS_BY_LEVEL = {
-    1: {  # Level 1: BERBAHAYA (Merah 🔴) - Indikasi Pasti Berbahaya
-        # Pola Regex untuk URL webhook Discord yang lebih spesifik
-        r"discord\.com/api/webhooks/\d+/[A-Za-z0-9\-_]+": "URL Webhook Discord terdeteksi, indikasi kuat pencurian data.",
-        r"\bos\.execute\b": "Menjalankan perintah command-line di komputer pengguna (sangat berbahaya).",
-        # Pola Regex untuk loadstring, termasuk yang disamarkan dengan pcall
-        r"\b(pcall|xpcall)\s*\(\s*loadstring": "Mengeksekusi kode dinamis yang disembunyikan, sangat berbahaya.",
-        r"\bloadstring\b": "Mengeksekusi kode dari teks (metode umum untuk malware).",
-        r"base64\.decode": "Sering digunakan untuk menyembunyikan string berbahaya (URL webhook, kode).",
-        r"\bio\.popen\b": "Membuka program lain dan membaca outputnya.",
-        r"LuaObfuscator\.com": "Mengindikasikan kode yang sengaja disamarkan agar sulit dibaca.",
-        r"sendToDiscordEmbed": "Nama fungsi kustom yang jelas bertujuan mengirim data ke Discord."
+    1: {  # Level 1: BERBAHAYA (Merah 🔴)
+        r"discord\.com/api/webhooks/\d+/[A-Za-z0-9\-_]+": "Pencurian Data via Webhook",
+        r"\bos\.execute\b": "Eksekusi Perintah Sistem (Sangat Berbahaya)",
+        r"\b(pcall|xpcall)\s*\(\s*loadstring": "Eksekusi Kode Tersembunyi",
+        r"\bloadstring\b": "Eksekusi Kode dari Teks",
+        r"base64\.decode": "Penyamaran Kode via Base64",
+        r"\bio\.popen\b": "Interaksi Program Eksternal",
+        r"LuaObfuscator\.com": "Kode Sengaja Dibuat Sulit Dibaca",
+        r"sendToDiscordEmbed": "Fungsi Pengirim Data ke Discord"
     },
-    2: {  # Level 2: MENCURIGAKAN (Kuning 🟡) - Perlu Kewaspadaan
-        r"\bhttp\.request\b": "Membuat permintaan jaringan, bisa untuk mengirim data.",
-        r"\bfetch\s*\(|XMLHttpRequest": "Membuat permintaan jaringan (umum di JavaScript), bisa untuk mengirim data.",
-        r"\bsocket\.http\b": "Modul untuk membuat permintaan jaringan.",
-        r"require\s*\(('|\")lfs('|\")\)": "Memuat modul File System (lfs), berpotensi memanipulasi file di luar folder game.",
-        r"require\s*\(('|\")socket('|\")\)": "Memuat modul Socket untuk komunikasi jaringan tingkat rendah.",
-        r"\bdofile\b": "Menjalankan file skrip eksternal.",
-        r"\bio\.open\b": "Membuka file di komputer (bisa untuk membaca/menulis file sensitif).",
-        r"\bos\.remove\b": "Menghapus file dari komputer pengguna.",
-        r"\bos\.rename\b": "Mengubah nama file di komputer pengguna.",
-        r"\bsampGetPlayerNickname\b": "Mengambil nama panggilan pemain.",
-        r"\bsampGetCurrentServerAddress\b": "Mengambil alamat server yang sedang dimainkan.",
+    2: {  # Level 2: MENCURIGAKAN (Kuning 🟡)
+        r"\bhttp\.request\b": "Permintaan Jaringan (HTTP Request)",
+        r"\bfetch\s*\(|XMLHttpRequest": "Permintaan Jaringan (JavaScript)",
+        r"\bsocket\.http\b": "Modul Komunikasi Jaringan",
+        r"require\s*\(('|\")lfs('|\")\)": "Manipulasi File Sistem (LFS)",
+        r"require\s*\(('|\")socket('|\")\)": "Komunikasi Jaringan Tingkat Rendah",
+        r"\bdofile\b": "Menjalankan File Eksternal",
+        r"\bio\.open\b": "Akses Baca/Tulis File",
+        r"\bos\.remove\b": "Menghapus File Pengguna",
+        r"\bos\.rename\b": "Mengubah Nama File Pengguna",
+        r"\bsampGetPlayerNickname\b": "Pengambilan Nama Panggilan Pemain",
+        r"\bsampGetCurrentServerAddress\b": "Pengambilan Alamat Server",
     }
 }
 
@@ -56,7 +54,6 @@ def save_config(data):
     with open('config.json', 'w') as f: json.dump(data, f, indent=4)
 
 def scan_file_content(file_path):
-    """Fungsi pindai yang disempurnakan, memprioritaskan ancaman per baris."""
     all_detections = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -148,10 +145,11 @@ async def on_message(message):
     if not all_detections_in_archive:
         embed = discord.Embed(title="✅ Analisis Selesai: Aman", description=f"File `{attachment.filename}` tidak mengandung pola berbahaya yang terdaftar.", color=discord.Color.green())
     else:
+        # --- PENYEMPURNAAN TAMPILAN LAPORAN ---
         if overall_highest_level == 2:
-            embed = discord.Embed(title="🟡 Analisis Selesai: Mencurigakan", description=f"File `{attachment.filename}` mengandung skrip yang **patut diwaspadai**. Gunakan dengan hati-hati.", color=discord.Color.gold())
+            embed = discord.Embed(title="🟡 Analisis Selesai: Mencurigakan", description=f"File `{attachment.filename}` mengandung skrip yang patut diwaspadai.", color=discord.Color.gold())
         elif overall_highest_level == 1:
-            embed = discord.Embed(title="🚨 Analisis Selesai: SANGAT BERBAHAYA!", description=f"Sangat disarankan untuk **TIDAK MENGGUNAKAN** file `{attachment.filename}` ini.", color=discord.Color.red())
+            embed = discord.Embed(title="🚨 Analisis Selesai: SANGAT BERBAHAYA!", description=f"File `{attachment.filename}` mengandung ancaman serius.", color=discord.Color.red())
         
         display_limit = 5
         for i, (filename, detection) in enumerate(all_detections_in_archive):
@@ -159,7 +157,8 @@ async def on_message(message):
                 embed.add_field(name="...", value=f"Dan {len(all_detections_in_archive) - display_limit} temuan lainnya...", inline=False)
                 break
             
-            field_name = f"File: `{filename}` | Baris: {detection['line_num']}"
+            # Teks field diubah agar lebih jelas
+            field_name = f"File: `{filename}` (Baris {detection['line_num']})"
             field_value = f"**Ancaman:** {detection['description']}\n"
             field_value += f"```lua\n{detection['line_content']}\n```"
             embed.add_field(name=field_name, value=field_value, inline=False)
