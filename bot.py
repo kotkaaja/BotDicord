@@ -15,30 +15,32 @@ if not BOT_TOKEN:
 TEMP_DIR = "temp_scan"
 ALLOWED_EXTENSIONS = ['.lua', '.luac', '.txt', '.zip', '.js', '.html', '.htm']
 
-# --- DAFTAR POLA DENGAN PENAMBAHAN BARU ---
+# --- DAFTAR POLA YANG DISEMPURNAKAN DENGAN REGEX ---
 PATTERNS_BY_LEVEL = {
-    1: {  # Level 1: BERBAHAYA (Merah 🔴)
-        "discord.com/api/webhooks": "Mengirim data ke luar melalui Discord webhook (potensi pencurian data).",
-        "os.execute": "Menjalankan perintah command-line di komputer pengguna (sangat berbahaya).",
-        "loadstring": "Mengeksekusi kode dari teks (metode umum untuk malware).",
-        "base64.decode": "Sering digunakan untuk menyembunyikan string berbahaya (URL webhook, kode).",
-        "io.popen": "Membuka program lain dan membaca outputnya.",
-        "LuaObfuscator.com": "Mengindikasikan kode yang sengaja disamarkan agar sulit dibaca.",
-        "sendToDiscordEmbed": "Nama fungsi kustom yang jelas bertujuan mengirim data ke Discord." # Pola Baru
+    1: {  # Level 1: BERBAHAYA (Merah 🔴) - Indikasi Pasti Berbahaya
+        # Pola Regex untuk URL webhook Discord yang lebih spesifik
+        r"discord\.com/api/webhooks/\d+/[A-Za-z0-9\-_]+": "URL Webhook Discord terdeteksi, indikasi kuat pencurian data.",
+        r"\bos\.execute\b": "Menjalankan perintah command-line di komputer pengguna (sangat berbahaya).",
+        # Pola Regex untuk loadstring, termasuk yang disamarkan dengan pcall
+        r"\b(pcall|xpcall)\s*\(\s*loadstring": "Mengeksekusi kode dinamis yang disembunyikan, sangat berbahaya.",
+        r"\bloadstring\b": "Mengeksekusi kode dari teks (metode umum untuk malware).",
+        r"base64\.decode": "Sering digunakan untuk menyembunyikan string berbahaya (URL webhook, kode).",
+        r"\bio\.popen\b": "Membuka program lain dan membaca outputnya.",
+        r"LuaObfuscator\.com": "Mengindikasikan kode yang sengaja disamarkan agar sulit dibaca.",
+        r"sendToDiscordEmbed": "Nama fungsi kustom yang jelas bertujuan mengirim data ke Discord."
     },
-    2: {  # Level 2: MENCURIGAKAN (Kuning 🟡)
-        "http.request": "Membuat permintaan jaringan, bisa untuk mengirim data.",
-        "fetch(": "Membuat permintaan jaringan (umum di JavaScript).",
-        "socket.http": "Modul untuk membuat permintaan jaringan.",
-        "http://": "Mendeteksi URL non-HTTPS, bisa untuk mengirim data.",
-        "pastebin.com": "Sering digunakan untuk hosting dan pengambilan data curian.",
-        "dofile": "Menjalankan file skrip eksternal.",
-        "loadfile": "Memuat file skrip eksternal untuk dieksekusi.",
-        "io.open": "Membuka file di komputer (bisa untuk membaca/menulis file sensitif).",
-        "os.remove": "Menghapus file dari komputer pengguna.",
-        "os.rename": "Mengubah nama file di komputer pengguna.",
-        "sampGetPlayerNickname": "Mengambil nama panggilan pemain.",
-        "sampGetCurrentServerAddress": "Mengambil alamat server yang sedang dimainkan.",
+    2: {  # Level 2: MENCURIGAKAN (Kuning 🟡) - Perlu Kewaspadaan
+        r"\bhttp\.request\b": "Membuat permintaan jaringan, bisa untuk mengirim data.",
+        r"\bfetch\s*\(|XMLHttpRequest": "Membuat permintaan jaringan (umum di JavaScript), bisa untuk mengirim data.",
+        r"\bsocket\.http\b": "Modul untuk membuat permintaan jaringan.",
+        r"require\s*\(('|\")lfs('|\")\)": "Memuat modul File System (lfs), berpotensi memanipulasi file di luar folder game.",
+        r"require\s*\(('|\")socket('|\")\)": "Memuat modul Socket untuk komunikasi jaringan tingkat rendah.",
+        r"\bdofile\b": "Menjalankan file skrip eksternal.",
+        r"\bio\.open\b": "Membuka file di komputer (bisa untuk membaca/menulis file sensitif).",
+        r"\bos\.remove\b": "Menghapus file dari komputer pengguna.",
+        r"\bos\.rename\b": "Mengubah nama file di komputer pengguna.",
+        r"\bsampGetPlayerNickname\b": "Mengambil nama panggilan pemain.",
+        r"\bsampGetCurrentServerAddress\b": "Mengambil alamat server yang sedang dimainkan.",
     }
 }
 
@@ -46,36 +48,35 @@ PATTERNS_BY_LEVEL = {
 def load_config():
     if not os.path.exists('config.json'):
         default_config = {"allowed_channels_for_scan": []}
-        with open('config.json', 'w') as f:
-            json.dump(default_config, f, indent=4)
+        with open('config.json', 'w') as f: json.dump(default_config, f, indent=4)
         return default_config
-    with open('config.json', 'r') as f:
-        return json.load(f)
+    with open('config.json', 'r') as f: return json.load(f)
 
 def save_config(data):
-    with open('config.json', 'w') as f:
-        json.dump(data, f, indent=4)
+    with open('config.json', 'w') as f: json.dump(data, f, indent=4)
 
 def scan_file_content(file_path):
-    detections = []
+    """Fungsi pindai yang disempurnakan, memprioritaskan ancaman per baris."""
+    all_detections = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
-            for line_num, line in enumerate(lines, 1):
-                # Iterasi berdasarkan level, mulai dari yang paling berbahaya
-                for level in sorted(PATTERNS_BY_LEVEL.keys()):
-                    patterns = PATTERNS_BY_LEVEL[level]
-                    for pattern, description in patterns.items():
-                        if re.search(pattern, line, re.IGNORECASE):
-                            detections.append({
-                                "level": level, "pattern": pattern, "description": description,
-                                "line_num": line_num, "line_content": line.strip()
-                            })
-                            # Jika sudah ketemu di satu baris, bisa lanjut ke baris berikutnya
-                            # Namun kita biarkan untuk menangkap semua kemungkinan dalam satu baris
+        for line_num, line in enumerate(lines, 1):
+            if not line.strip(): continue
+            
+            highest_threat_on_line = None
+            for level in sorted(PATTERNS_BY_LEVEL.keys()):
+                for pattern, description in PATTERNS_BY_LEVEL[level].items():
+                    if re.search(pattern, line, re.IGNORECASE):
+                        highest_threat_on_line = {
+                            "level": level, "pattern": pattern, "description": description,
+                            "line_num": line_num, "line_content": line.strip()
+                        }
+            if highest_threat_on_line:
+                all_detections.append(highest_threat_on_line)
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
-    return detections
+    return all_detections
 
 # --- Inisialisasi Bot ---
 class MyClient(discord.Client):
@@ -92,18 +93,15 @@ client = MyClient(intents=intents)
 @client.event
 async def on_ready():
     print(f'Bot telah masuk sebagai {client.user}')
-    if not os.path.exists(TEMP_DIR):
-        os.makedirs(TEMP_DIR)
+    if not os.path.exists(TEMP_DIR): os.makedirs(TEMP_DIR)
 
 @client.event
 async def on_message(message):
-    if message.author == client.user or not message.attachments:
-        return
+    if message.author == client.user or not message.attachments: return
     
     config = load_config()
     scan_channels = config.get("allowed_channels_for_scan", [])
-    if message.channel.id not in scan_channels:
-        return
+    if message.channel.id not in scan_channels: return
 
     attachment = message.attachments[0]
     file_extension = os.path.splitext(attachment.filename)[1].lower()
@@ -113,8 +111,7 @@ async def on_message(message):
         await message.reply(embed=embed)
         return
 
-    if file_extension not in ALLOWED_EXTENSIONS:
-        return
+    if file_extension not in ALLOWED_EXTENSIONS: return
 
     download_path = os.path.join(TEMP_DIR, attachment.filename)
     await attachment.save(download_path)
@@ -163,7 +160,7 @@ async def on_message(message):
                 break
             
             field_name = f"File: `{filename}` | Baris: {detection['line_num']}"
-            field_value = f"**Pattern Terdeteksi:** `{detection['pattern']}`\n"
+            field_value = f"**Ancaman:** {detection['description']}\n"
             field_value += f"```lua\n{detection['line_content']}\n```"
             embed.add_field(name=field_name, value=field_value, inline=False)
 
@@ -186,18 +183,11 @@ class Setup(app_commands.Group):
         config = load_config()
         scan_channels = config.get("allowed_channels_for_scan", [])
         if action == 'tambah':
-            if channel.id not in scan_channels:
-                scan_channels.append(channel.id)
-                await interaction.response.send_message(f"✅ Channel {channel.mention} sekarang akan dipindai.", ephemeral=True)
-            else:
-                await interaction.response.send_message(f"ℹ️ Channel {channel.mention} sudah ada di daftar.", ephemeral=True)
+            if channel.id not in scan_channels: scan_channels.append(channel.id)
+            await interaction.response.send_message(f"✅ Channel {channel.mention} sekarang akan dipindai.", ephemeral=True)
         elif action == 'hapus':
-            if channel.id in scan_channels:
-                scan_channels.remove(channel.id)
-                await interaction.response.send_message(f"❌ Channel {channel.mention} telah dihapus dari daftar pindai.", ephemeral=True)
-            else:
-                await interaction.response.send_message(f"ℹ️ Channel {channel.mention} tidak ada di daftar.", ephemeral=True)
-        
+            if channel.id in scan_channels: scan_channels.remove(channel.id)
+            await interaction.response.send_message(f"❌ Channel {channel.mention} telah dihapus dari daftar pindai.", ephemeral=True)
         config["allowed_channels_for_scan"] = scan_channels
         save_config(config)
 
