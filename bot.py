@@ -67,9 +67,7 @@ async def process_subscription_image(attachment):
         print(f"Error processing image with OCR: {e}")
         return ""
 
-# --- PERUBAHAN 3: Logika scan diubah untuk menangkap baris kode ---
 def scan_file_content(file_path):
-    """Membaca file baris per baris dan mengembalikan SEMUA temuan, termasuk baris kode."""
     detections = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -78,11 +76,8 @@ def scan_file_content(file_path):
                     for pattern, description in patterns.items():
                         if re.search(pattern, line, re.IGNORECASE):
                             detections.append({
-                                "level": level,
-                                "pattern": pattern,
-                                "description": description,
-                                "line_num": line_num,
-                                "line_content": line.strip()
+                                "level": level, "pattern": pattern, "description": description,
+                                "line_num": line_num, "line_content": line.strip()
                             })
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
@@ -122,7 +117,6 @@ async def on_message(message):
     if file_extension == '.luac':
         embed = discord.Embed(title="ℹ️ File Dilewati (Tidak Dipindai)", description=f"File `{attachment.filename}` adalah file Lua terkompilasi (`.luac`). Kontennya tidak dapat dianalisis.", color=discord.Color.blue())
         await message.reply(embed=embed)
-        # PERUBAHAN 2: Fitur hapus file dinonaktifkan
         return
 
     if file_extension not in ALLOWED_EXTENSIONS:
@@ -160,7 +154,6 @@ async def on_message(message):
     
     os.remove(download_path)
 
-    # PERUBAHAN 3: Logika pembuatan embed diubah untuk menampilkan baris kode
     if overall_highest_level == 0:
         embed = discord.Embed(title="✅ Analisis Selesai: Aman", description=f"File `{attachment.filename}` tidak mengandung pola berbahaya.", color=discord.Color.green())
     else:
@@ -169,8 +162,7 @@ async def on_message(message):
         elif overall_highest_level == 1:
             embed = discord.Embed(title="🚨 Analisis Selesai: SANGAT BERBAHAYA!", description=f"Sangat disarankan untuk **TIDAK MENGGUNAKAN** file `{attachment.filename}` ini.", color=discord.Color.red())
         
-        # Batasi jumlah field agar tidak terlalu panjang
-        display_limit = 5 
+        display_limit = 5
         for i, (filename, detection) in enumerate(all_detections_in_archive):
             if i >= display_limit:
                 embed.add_field(name="...", value=f"Dan {len(all_detections_in_archive) - display_limit} temuan lainnya...", inline=False)
@@ -182,7 +174,6 @@ async def on_message(message):
             embed.add_field(name=field_name, value=field_value, inline=False)
 
     await message.reply(embed=embed)
-    # PERUBAHAN 2: Fitur hapus file dinonaktifkan. Tidak ada lagi message.delete()
 
 # --- Slash Commands ---
 @client.tree.command(name="subscribe", description="Verifikasi subscription YouTube dengan screenshot.")
@@ -203,7 +194,6 @@ async def subscribe(interaction: discord.Interaction, screenshot: discord.Attach
     
     extracted_text = await process_subscription_image(screenshot)
     
-    # --- PERUBAHAN 1: Target channel diubah ke 'kotkaaja' ---
     if "kotkaaja" in extracted_text and ("disubscribe" in extracted_text or "subscribed" in extracted_text):
         subscriber_role = interaction.guild.get_role(role_id)
         if subscriber_role and not any(role.id == role_id for role in interaction.user.roles):
@@ -221,19 +211,46 @@ async def on_subscribe_error(interaction: discord.Interaction, error: app_comman
     if isinstance(error, app_commands.CommandOnCooldown):
         await interaction.response.send_message(f"Perintah ini sedang dalam cooldown. Coba lagi dalam **{round(error.retry_after)} detik**.", ephemeral=True)
 
-# ... (Kode untuk /setup tetap sama, tidak ada perubahan)
+# --- BAGIAN INI SEKARANG LENGKAP ---
 @app_commands.default_permissions(administrator=True)
 class Setup(app_commands.Group):
+    """Perintah untuk mengatur bot."""
     def __init__(self, client: discord.Client):
         super().__init__(name="setup", description="Perintah untuk mengatur bot.")
         self.client = client
 
     @app_commands.command(name="scan_channel", description="Tambah/hapus channel untuk pemindaian file.")
-    #... (kode lengkap setup scan_channel)
+    @app_commands.describe(action="Pilih aksi", channel="Pilih channel")
+    @app_commands.choices(action=[
+        discord.app_commands.Choice(name="Tambah", value="tambah"),
+        discord.app_commands.Choice(name="Hapus", value="hapus")
+    ])
+    async def scan_channel(self, interaction: discord.Interaction, action: str, channel: discord.TextChannel):
+        config = load_config()
+        scan_channels = config.get("allowed_channels_for_scan", [])
+        if action == 'tambah':
+            if channel.id not in scan_channels:
+                scan_channels.append(channel.id)
+                await interaction.response.send_message(f"✅ Channel {channel.mention} sekarang akan dipindai.", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"ℹ️ Channel {channel.mention} sudah ada di daftar.", ephemeral=True)
+        elif action == 'hapus':
+            if channel.id in scan_channels:
+                scan_channels.remove(channel.id)
+                await interaction.response.send_message(f"❌ Channel {channel.mention} telah dihapus dari daftar pindai.", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"ℹ️ Channel {channel.mention} tidak ada di daftar.", ephemeral=True)
+        
+        config["allowed_channels_for_scan"] = scan_channels
+        save_config(config)
 
     @app_commands.command(name="sub_role", description="Atur role yang diberikan setelah verifikasi subscribe.")
-    #... (kode lengkap setup sub_role)
-    pass # Placeholder untuk meringkas, kode aslinya lengkap dari sebelumnya
+    @app_commands.describe(role="Pilih role untuk subscriber")
+    async def sub_role(self, interaction: discord.Interaction, role: discord.Role):
+        config = load_config()
+        config["subscriber_role_id"] = role.id
+        save_config(config)
+        await interaction.response.send_message(f"✅ Role subscriber diatur ke **{role.name}**.", ephemeral=True)
 
 # Menambahkan grup command ke tree
 client.tree.add_command(Setup(client))
