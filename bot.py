@@ -5,8 +5,6 @@ import json
 import re
 import zipfile
 import shutil
-from PIL import Image
-import pytesseract
 
 # --- Variabel & Konfigurasi ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -17,6 +15,7 @@ if not BOT_TOKEN:
 TEMP_DIR = "temp_scan"
 ALLOWED_EXTENSIONS = ['.lua', '.luac', '.txt', '.zip', '.js', '.html', '.htm']
 
+# --- DAFTAR POLA DENGAN PENAMBAHAN BARU ---
 PATTERNS_BY_LEVEL = {
     1: {  # Level 1: BERBAHAYA (Merah 🔴)
         "discord.com/api/webhooks": "Mengirim data ke luar melalui Discord webhook (potensi pencurian data).",
@@ -25,6 +24,7 @@ PATTERNS_BY_LEVEL = {
         "base64.decode": "Sering digunakan untuk menyembunyikan string berbahaya (URL webhook, kode).",
         "io.popen": "Membuka program lain dan membaca outputnya.",
         "LuaObfuscator.com": "Mengindikasikan kode yang sengaja disamarkan agar sulit dibaca.",
+        "sendToDiscordEmbed": "Nama fungsi kustom yang jelas bertujuan mengirim data ke Discord." # Pola Baru
     },
     2: {  # Level 2: MENCURIGAKAN (Kuning 🟡)
         "http.request": "Membuat permintaan jaringan, bisa untuk mengirim data.",
@@ -45,7 +45,7 @@ PATTERNS_BY_LEVEL = {
 # --- Fungsi Helper ---
 def load_config():
     if not os.path.exists('config.json'):
-        default_config = {"allowed_channels_for_scan": [], "subscriber_role_id": 0}
+        default_config = {"allowed_channels_for_scan": []}
         with open('config.json', 'w') as f:
             json.dump(default_config, f, indent=4)
         return default_config
@@ -56,29 +56,23 @@ def save_config(data):
     with open('config.json', 'w') as f:
         json.dump(data, f, indent=4)
 
-async def process_subscription_image(attachment):
-    try:
-        temp_image_path = os.path.join(TEMP_DIR, attachment.filename)
-        await attachment.save(temp_image_path)
-        extracted_text = pytesseract.image_to_string(Image.open(temp_image_path))
-        os.remove(temp_image_path)
-        return extracted_text.lower()
-    except Exception as e:
-        print(f"Error processing image with OCR: {e}")
-        return ""
-
 def scan_file_content(file_path):
     detections = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for line_num, line in enumerate(f, 1):
-                for level, patterns in PATTERNS_BY_LEVEL.items():
+            lines = f.readlines()
+            for line_num, line in enumerate(lines, 1):
+                # Iterasi berdasarkan level, mulai dari yang paling berbahaya
+                for level in sorted(PATTERNS_BY_LEVEL.keys()):
+                    patterns = PATTERNS_BY_LEVEL[level]
                     for pattern, description in patterns.items():
                         if re.search(pattern, line, re.IGNORECASE):
                             detections.append({
                                 "level": level, "pattern": pattern, "description": description,
                                 "line_num": line_num, "line_content": line.strip()
                             })
+                            # Jika sudah ketemu di satu baris, bisa lanjut ke baris berikutnya
+                            # Namun kita biarkan untuk menangkap semua kemungkinan dalam satu baris
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
     return detections
@@ -154,8 +148,8 @@ async def on_message(message):
     
     os.remove(download_path)
 
-    if overall_highest_level == 0:
-        embed = discord.Embed(title="✅ Analisis Selesai: Aman", description=f"File `{attachment.filename}` tidak mengandung pola berbahaya.", color=discord.Color.green())
+    if not all_detections_in_archive:
+        embed = discord.Embed(title="✅ Analisis Selesai: Aman", description=f"File `{attachment.filename}` tidak mengandung pola berbahaya yang terdaftar.", color=discord.Color.green())
     else:
         if overall_highest_level == 2:
             embed = discord.Embed(title="🟡 Analisis Selesai: Mencurigakan", description=f"File `{attachment.filename}` mengandung skrip yang **patut diwaspadai**. Gunakan dengan hati-hati.", color=discord.Color.gold())
@@ -175,46 +169,9 @@ async def on_message(message):
 
     await message.reply(embed=embed)
 
-# --- Slash Commands ---
-@client.tree.command(name="subscribe", description="Verifikasi subscription YouTube dengan screenshot.")
-@app_commands.describe(screenshot="Upload screenshot yang menunjukkan Anda sudah subscribe.")
-@app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
-async def subscribe(interaction: discord.Interaction, screenshot: discord.Attachment):
-    config = load_config()
-    role_id = config.get("subscriber_role_id", 0)
-    
-    if role_id == 0:
-        await interaction.response.send_message("Fitur subscribe belum diatur oleh admin.", ephemeral=True)
-        return
-    if not screenshot.content_type or not screenshot.content_type.startswith('image'):
-        await interaction.response.send_message("File yang diunggah bukan gambar. Coba lagi.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    
-    extracted_text = await process_subscription_image(screenshot)
-    
-    if "kotkaaja" in extracted_text and ("disubscribe" in extracted_text or "subscribed" in extracted_text):
-        subscriber_role = interaction.guild.get_role(role_id)
-        if subscriber_role and not any(role.id == role_id for role in interaction.user.roles):
-            await interaction.user.add_roles(subscriber_role)
-            await interaction.followup.send(f"Terima kasih sudah subscribe! Role **{subscriber_role.name}** telah diberikan. ✅")
-        elif not subscriber_role:
-            await interaction.followup.send("Verifikasi berhasil, tapi role subscriber tidak ditemukan. Hubungi admin.")
-        else:
-            await interaction.followup.send("Anda sudah memiliki role subscriber. Terima kasih!")
-    else:
-        await interaction.followup.send("Verifikasi gagal. Pastikan screenshot menunjukkan channel **Kotkaaja** dan status **sudah subscribe**.")
-
-@subscribe.error
-async def on_subscribe_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.CommandOnCooldown):
-        await interaction.response.send_message(f"Perintah ini sedang dalam cooldown. Coba lagi dalam **{round(error.retry_after)} detik**.", ephemeral=True)
-
-# --- BAGIAN INI SEKARANG LENGKAP ---
+# --- Slash Commands (Hanya Setup) ---
 @app_commands.default_permissions(administrator=True)
 class Setup(app_commands.Group):
-    """Perintah untuk mengatur bot."""
     def __init__(self, client: discord.Client):
         super().__init__(name="setup", description="Perintah untuk mengatur bot.")
         self.client = client
@@ -244,15 +201,6 @@ class Setup(app_commands.Group):
         config["allowed_channels_for_scan"] = scan_channels
         save_config(config)
 
-    @app_commands.command(name="sub_role", description="Atur role yang diberikan setelah verifikasi subscribe.")
-    @app_commands.describe(role="Pilih role untuk subscriber")
-    async def sub_role(self, interaction: discord.Interaction, role: discord.Role):
-        config = load_config()
-        config["subscriber_role_id"] = role.id
-        save_config(config)
-        await interaction.response.send_message(f"✅ Role subscriber diatur ke **{role.name}**.", ephemeral=True)
-
-# Menambahkan grup command ke tree
 client.tree.add_command(Setup(client))
 
 # Jalankan bot
