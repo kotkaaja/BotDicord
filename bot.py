@@ -52,9 +52,7 @@ def load_config():
 def save_config(data):
     with open('config.json', 'w') as f: json.dump(data, f, indent=4)
 
-# --- FUNGSI SCAN DENGAN LOGIKA YANG SUDAH DIPERBAIKI TOTAL ---
 def scan_file_content(file_path):
-    """Fungsi pindai yang disempurnakan, memprioritaskan ancaman per baris."""
     all_detections = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -63,7 +61,6 @@ def scan_file_content(file_path):
         for line_num, line in enumerate(lines, 1):
             if not line.strip(): continue
             
-            # Cari ancaman level tertinggi di setiap baris
             found_threat = None
             for level in sorted(PATTERNS_BY_LEVEL.keys()): # Cek dari Level 1 dulu
                 for pattern, description in PATTERNS_BY_LEVEL[level].items():
@@ -72,9 +69,9 @@ def scan_file_content(file_path):
                             "level": level, "pattern": pattern, "description": description,
                             "line_num": line_num, "line_content": line.strip()
                         }
-                        break # Hentikan pencarian pattern lain di level ini
+                        break
                 if found_threat:
-                    break # Hentikan pencarian level lain, karena sudah ketemu yang paling berbahaya
+                    break
             
             if found_threat:
                 all_detections.append(found_threat)
@@ -122,7 +119,10 @@ async def on_message(message):
     await attachment.save(download_path)
     
     all_detections_in_archive = []
-    overall_highest_level = 0
+    
+    # --- PERBAIKAN LOGIKA KRITIS ---
+    # Nilai awal harus lebih tinggi dari level manapun (misal 3), karena level bahaya terendah (1) adalah yang paling prioritas.
+    overall_highest_level = 3 
 
     if file_extension == '.zip':
         extract_folder = os.path.join(TEMP_DIR, "extracted_zip")
@@ -137,7 +137,8 @@ async def on_message(message):
                     relative_path = os.path.relpath(file_path, extract_folder)
                     for detection in detections:
                         all_detections_in_archive.append((relative_path, detection))
-                        if detection['level'] > overall_highest_level:
+                        # Logika perbandingan dibalik: level yang lebih KECIL lebih berbahaya
+                        if detection['level'] < overall_highest_level:
                             overall_highest_level = detection['level']
         shutil.rmtree(extract_folder)
     else:
@@ -145,7 +146,8 @@ async def on_message(message):
         if detections:
             for detection in detections:
                 all_detections_in_archive.append((attachment.filename, detection))
-                if detection['level'] > overall_highest_level:
+                # Logika perbandingan dibalik: level yang lebih KECIL lebih berbahaya
+                if detection['level'] < overall_highest_level:
                     overall_highest_level = detection['level']
     
     os.remove(download_path)
