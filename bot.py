@@ -15,7 +15,6 @@ if not BOT_TOKEN:
 TEMP_DIR = "temp_scan"
 ALLOWED_EXTENSIONS = ['.lua', '.luac', '.txt', '.zip', '.js', '.html', '.htm']
 
-# --- DAFTAR POLA YANG DISEMPURNAKAN DENGAN REGEX ---
 PATTERNS_BY_LEVEL = {
     1: {  # Level 1: BERBAHAYA (Merah 🔴)
         r"discord\.com/api/webhooks/\d+/[A-Za-z0-9\-_]+": "Pencurian Data via Webhook",
@@ -53,24 +52,33 @@ def load_config():
 def save_config(data):
     with open('config.json', 'w') as f: json.dump(data, f, indent=4)
 
+# --- FUNGSI SCAN DENGAN LOGIKA YANG SUDAH DIPERBAIKI TOTAL ---
 def scan_file_content(file_path):
+    """Fungsi pindai yang disempurnakan, memprioritaskan ancaman per baris."""
     all_detections = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
+        
         for line_num, line in enumerate(lines, 1):
             if not line.strip(): continue
             
-            highest_threat_on_line = None
-            for level in sorted(PATTERNS_BY_LEVEL.keys()):
+            # Cari ancaman level tertinggi di setiap baris
+            found_threat = None
+            for level in sorted(PATTERNS_BY_LEVEL.keys()): # Cek dari Level 1 dulu
                 for pattern, description in PATTERNS_BY_LEVEL[level].items():
                     if re.search(pattern, line, re.IGNORECASE):
-                        highest_threat_on_line = {
+                        found_threat = {
                             "level": level, "pattern": pattern, "description": description,
                             "line_num": line_num, "line_content": line.strip()
                         }
-            if highest_threat_on_line:
-                all_detections.append(highest_threat_on_line)
+                        break # Hentikan pencarian pattern lain di level ini
+                if found_threat:
+                    break # Hentikan pencarian level lain, karena sudah ketemu yang paling berbahaya
+            
+            if found_threat:
+                all_detections.append(found_threat)
+
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
     return all_detections
@@ -145,7 +153,6 @@ async def on_message(message):
     if not all_detections_in_archive:
         embed = discord.Embed(title="✅ Analisis Selesai: Aman", description=f"File `{attachment.filename}` tidak mengandung pola berbahaya yang terdaftar.", color=discord.Color.green())
     else:
-        # --- PENYEMPURNAAN TAMPILAN LAPORAN ---
         if overall_highest_level == 2:
             embed = discord.Embed(title="🟡 Analisis Selesai: Mencurigakan", description=f"File `{attachment.filename}` mengandung skrip yang patut diwaspadai.", color=discord.Color.gold())
         elif overall_highest_level == 1:
@@ -157,7 +164,6 @@ async def on_message(message):
                 embed.add_field(name="...", value=f"Dan {len(all_detections_in_archive) - display_limit} temuan lainnya...", inline=False)
                 break
             
-            # Teks field diubah agar lebih jelas
             field_name = f"File: `{filename}` (Baris {detection['line_num']})"
             field_value = f"**Ancaman:** {detection['description']}\n"
             field_value += f"```lua\n{detection['line_content']}\n```"
