@@ -1,2 +1,4 @@
 discord.py
 py-cord
+pytesseract
+Pillow
